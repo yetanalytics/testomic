@@ -1,10 +1,18 @@
 # testomic
 
 [![Build Status](https://travis-ci.org/yetanalytics/testomic.svg?branch=master)](https://travis-ci.org/yetanalytics/testomic)
+[![Clojars Project](https://img.shields.io/clojars/v/com.yetanalytics/testomic.svg)](https://clojars.org/com.yetanalytics/testomic)
 
 A small library to ease testing with [Datomic](http://www.datomic.com/) and (optionally) [conformity](https://github.com/rkneufeld/conformity)
 
 ## Usage
+
+``` clojure
+;; If you are using datomic pro, exclude the datomic free dep!
+:dependencies [[com.yetanalytics/testomic "0.1.0"
+                :exclusions [com.datomic/datomic-free]]]
+
+```
 
 Testomic provides a dynamic variable `testomic.core/conn` to use in your tests, and a set of macros and utilities to bind/use it.
 
