@@ -1,6 +1,6 @@
 (defproject com.yetanalytics/testomic "0.1.0-SNAPSHOT"
   :description "Testing utilities and macros for use with datomic."
-  :url "http://example.com/FIXME"
+  :url "http://github.com/yetanalytics/testomic"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
