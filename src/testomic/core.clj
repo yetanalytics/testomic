@@ -72,7 +72,7 @@
 (defmacro with-norms
   "Binds the given norms map and runs body"
   [norms-map & body]
-  `(binding [*norms-map* ~norms-map]
+  `(binding [testomic.core/*norms-map* ~norms-map]
      ~@body))
 
 (defmacro with-norms-path
@@ -82,22 +82,21 @@
      ~@body))
 
 (defmacro with-conn
-  "Binds conn to run body if unbound, then releases it."
-  [& body]
-  `(if conn
-     (do ~@body)
-     (binding [*db-uri* (rand-db-uri)]
-       (binding [conn (new-conn *db-uri*)]
+  "Binds conn to run body, then releases it."
+  [conn-sym & body]
+  `(binding [testomic.core/*db-uri* (rand-db-uri)]
+     (binding [testomic.core/conn (new-conn testomic.core/*db-uri*)]
+       (let [~conn-sym testomic.core/conn]
          (try ~@body
               (finally
-                (d/release conn)))))))
+                (d/release testomic.core/conn)))))))
 
 (defn- wrap-tempid
   "Wrap a symbol in a Cons that will resolve it if it is bound to a tempid.
-   Used internally by with-conn"
+   Used internally by let-txs"
   ^clojure.lang.Cons [^clojure.lang.Symbol maybe-tid-sym]
   `(if (tempid? ~maybe-tid-sym)
-     (datomic.api/resolve-tempid (d/db conn) *tempid-map* ~maybe-tid-sym)
+     (datomic.api/resolve-tempid (d/db testomic.core/conn) testomic.core/*tempid-map* ~maybe-tid-sym)
      ~maybe-tid-sym))
 
 (defmacro let-txs
@@ -120,11 +119,11 @@
                                     (map
                                      wrap-tempid
                                      (take-nth 2 destructured))))]
-    `(with-conn
-       (let* ~destructured
-         (binding [*tempid-map* (reduce-tx-tempids conn ~tx-symbols)]
-           (let* ~destructured-wrapped
-             ~@body))))))
+    `(let* ~destructured
+       (assert testomic.core/conn "No conn present!")
+      (binding [testomic.core/*tempid-map* (reduce-tx-tempids testomic.core/conn ~tx-symbols)]
+        (let* ~destructured-wrapped
+          ~@body)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test Fixtures/Fixture Factories
