@@ -3,7 +3,7 @@
 [![Build Status](https://travis-ci.org/yetanalytics/testomic.svg?branch=master)](https://travis-ci.org/yetanalytics/testomic)
 [![Clojars Project](https://img.shields.io/clojars/v/com.yetanalytics/testomic.svg)](https://clojars.org/com.yetanalytics/testomic)
 
-A small library to ease testing with [Datomic](http://www.datomic.com/) and (optionally) [conformity](https://github.com/rkneufeld/conformity)
+A small library to ease testing with [Datomic](http://www.datomic.com/) and (optionally) [conformity](https://github.com/rkneufeld/conformity).
 
 ## Usage
 
@@ -14,51 +14,49 @@ A small library to ease testing with [Datomic](http://www.datomic.com/) and (opt
 
 ```
 
-Testomic provides a dynamic variable `testomic.core/conn` to use in your tests, and a set of macros and utilities to bind/use it.
-
 For a fresh conn that will be automatically released/deleted:
 
 ``` clojure
 (require '[testomic.core :refer :all])
 
-;; conn is nil by default
-(type conn) ;; => nil
-
-(with-conn
-  (type conn)) ;; => datomic.peer.LocalConnection
+(with-conn foo
+  (type foo)) ;; => datomic.peer.LocalConnection
 
 ```
 
 For a conn with data transacted in, can bind values like let:
 
 ``` clojure
-(let-txs [;; first binding/tx
-          [[op1 eid1 attr1 val1] :as tx1]
-          [[:db/add (d/tempid :db.part/user) :person/name "Bob"]]
-          ;; second binding/tx
-          [[op2 eid2 attr2 val2] :as tx2]
-          [[:db/add (d/tempid :db.part/user) :person/name "Alice"]]]
+(with-conn foo
+  (let-txs [;; first binding/tx
+            [[op1 eid1 attr1 val1] :as tx1]
+            [[:db/add (d/tempid :db.part/user) :person/name "Bob"]]
+            ;; second binding/tx
+            [[op2 eid2 attr2 val2] :as tx2]
+            [[:db/add (d/tempid :db.part/user) :person/name "Alice"]]]
 
   ;; accepts multiple transactions
   (d/q '[:find ?name
          :where
          [_ :person/name ?name]]
-       (d/db conn)) ;; => #{["Bob"] ["Alice"]}
+       (d/db foo)) ;; => #{["Bob"] ["Alice"]}
 
   ;; resolves-tempids
-  (:person/name (d/entity (d/db conn) eid1)) ;; => "Bob"
-  (:person/name (d/entity (d/db conn) eid2)) ;; => "Alice"
+  (:person/name (d/entity (d/db foo) eid1)) ;; => "Bob"
+  (:person/name (d/entity (d/db foo) eid2)) ;; => "Alice"
 
   ;; will not override a conn if nested!
   (let-txs [tx3 [[:db/add (d/tempid :db.part/user) :person/name "Ethel"]]]
     (d/q '[:find (count ?person) .
            :where
-           [?person :person/name]] (d/db conn)) ;; => 3
-    ))
+           [?person :person/name]] (d/db foo)) ;; => 3
+    )))
 
 ```
 
 If fixtures are your thing, you can use `wrap-conn` and `make-wrap-txs-fixture` to reduce code.
+You can use the dynamic variable `testomic.core/conn` in test functions using the fixtures.
+
 
 ### Schema
 

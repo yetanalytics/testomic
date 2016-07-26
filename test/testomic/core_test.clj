@@ -28,42 +28,42 @@
                          :db/cardinality :db.cardinality/one
                          :db/doc "A person's name"
                          :db.install/_attribute :db.part/db}]]}}
-    (with-conn
-      (is (d/attribute (d/db conn) :person/name)))))
+    (with-conn foo
+      (is (d/attribute (d/db foo) :person/name)))))
 
 (deftest with-norms-path-test
   (with-norms-path "test/norms.edn"
-    (with-conn
-      (is (d/attribute (d/db conn) :person/name)))))
+    (with-conn foo
+      (is (d/attribute (d/db foo) :person/name)))))
 
 (deftest with-conn-test
   (testing "binds a fresh conn to run body"
     (is (not=
          ;; first conn
-         (with-conn
-           conn)
+         (with-conn foo
+           foo)
          ;; second conn
-         (with-conn
-           conn))))
-  (testing "will not override a conn if one exists"
-    (with-conn
-      (is (= conn (with-conn conn))))))
+         (with-conn bar
+           bar)))))
 
 (deftest let-txs-test
   (with-norms-path "test/norms.edn"
-    (let-txs [[[op1 eid1 attr1 val1] :as tx1] [[:db/add (d/tempid :db.part/user) :person/name "Bob"]]
-              [[op2 eid2 attr2 val2] :as tx2] [[:db/add (d/tempid :db.part/user) :person/name "Alice"]]]
-      (testing "binds like let"
-        (is (= val1 "Bob"))
-        (is (= val2 "Alice")))
-      (testing "transacts data and resolves tempids"
-        (is (= #{[eid1 "Bob"] [eid2 "Alice"]}
-               (d/q '[:find ?eid ?name
-                      :where
-                      [?eid :person/name ?name]]
-                    (d/db conn)))))
-      (testing "will not override a conn if one exists"
-        (let-txs [tx3 [[:db/add (d/tempid :db.part/user) :person/name "Ethel"]]]
-          (is (= 3 (d/q '[:find (count ?person) .
-                          :where
-                          [?person :person/name]] (d/db conn)))))))))
+    (with-conn foo
+      (let-txs
+        [[[op1 eid1 attr1 val1] :as tx1] [[:db/add (d/tempid :db.part/user) :person/name "Bob"]]
+         [[op2 eid2 attr2 val2] :as tx2] [[:db/add (d/tempid :db.part/user) :person/name "Alice"]]]
+        (testing "binds like let"
+          (is (= val1 "Bob"))
+          (is (= val2 "Alice")))
+        (testing "transacts data and resolves tempids"
+          (is (= #{[eid1 "Bob"] [eid2 "Alice"]}
+                 (d/q '[:find ?eid ?name
+                        :where
+                        [?eid :person/name ?name]]
+                      (d/db foo)))))
+        (testing "Can be nested to add additional transactions"
+          (let-txs [tx3 [[:db/add (d/tempid :db.part/user) :person/name "Ethel"]]]
+            (is (= 3 (d/q '[:find (count ?person) .
+                            :where
+                            [?person :person/name]] (d/db foo))))
+            ))))))
