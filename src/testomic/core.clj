@@ -29,6 +29,20 @@
    {}
    txs))
 
+(defn reduce-tx-tempids-with
+  "Like reduce-tx-tempids, but takes a db and uses datomic.api/with"
+  [^datomic.db.Db db
+   ^clojure.lang.PersistentVector txs]
+  (reduce
+   (fn [{:keys [tx-tids db-after] :as result-map} tx]
+     (let [with-result (d/with db-after tx)]
+       (-> result-map
+           (update :tx-tids merge (:tempids with-result))
+           (assoc :db-after (:db-after with-result)))))
+   {:tx-tids {}
+    :db-after db}
+   txs))
+
 ;; This can be used to override the random db uri
 (def ^:dynamic *db-uri* nil)
 
@@ -39,7 +53,10 @@
 ;; API
 
 ;; Use this in tests wrapped with macros/fixtures below
-(def ^:dynamic conn nil)
+(def ^:dynamic *conn* nil)
+
+;; used for with mode
+(def ^:dynamic *db* nil)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Util
@@ -64,7 +81,13 @@
   "Manually resolve a tempid (such as one that was not bound in let-txs) using
    the bound conn and tempid-map."
   ^java.lang.Long [^datomic.db.DbId tid]
-  (d/resolve-tempid (d/db conn) *tempid-map* tid))
+  (d/resolve-tempid (d/db *conn*) *tempid-map* tid))
+
+(defn resolve-tempid-db
+  "Manually resolve a tempid (such as one that was not bound in let-txs) using
+   the bound conn and tempid-map."
+  ^java.lang.Long [^datomic.db.DbId tid]
+  (d/resolve-tempid *db* *tempid-map* tid))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Macros
@@ -85,25 +108,33 @@
   "Binds conn to run body, then releases it."
   [conn-sym & body]
   `(binding [testomic.core/*db-uri* (rand-db-uri)]
-     (binding [testomic.core/conn (new-conn testomic.core/*db-uri*)]
-       (let [~conn-sym testomic.core/conn]
-         (try ~@body
-              (finally
-                (d/release testomic.core/conn)))))))
+     (binding [testomic.core/*conn* (new-conn testomic.core/*db-uri*)]
+       (binding [testomic.core/*db* (d/db testomic.core/*conn*)]
+         (let [~conn-sym testomic.core/*conn*]
+           (try ~@body
+                (finally
+                  (d/release testomic.core/*conn*))))))))
 
 (defn- wrap-tempid
   "Wrap a symbol in a Cons that will resolve it if it is bound to a tempid.
    Used internally by let-txs"
   ^clojure.lang.Cons [^clojure.lang.Symbol maybe-tid-sym]
   `(if (tempid? ~maybe-tid-sym)
-     (datomic.api/resolve-tempid (d/db testomic.core/conn) testomic.core/*tempid-map* ~maybe-tid-sym)
+     (datomic.api/resolve-tempid (d/db testomic.core/*conn*) testomic.core/*tempid-map* ~maybe-tid-sym)
+     ~maybe-tid-sym))
+
+(defn- wrap-tempid-db
+  "Like wrap-tempid, but based on the currently bound db"
+  ^clojure.lang.Cons [^clojure.lang.Symbol maybe-tid-sym]
+  `(if (tempid? ~maybe-tid-sym)
+     (datomic.api/resolve-tempid testomic.core/*db* testomic.core/*tempid-map* ~maybe-tid-sym)
      ~maybe-tid-sym))
 
 (defmacro let-txs
-  [tx-bindings & body]
   "Like let, but each binding represents a transaction into conn.
    Bound tempids will be resolved to eids. If there is no conn, one will be
    created."
+  [tx-bindings & body]
   (assert (vector? tx-bindings) "a vector for its binding")
   (assert (even? (count tx-bindings)) "an even number of forms in binding vector")
   (let [destructured (destructure tx-bindings)
@@ -120,10 +151,39 @@
                                      wrap-tempid
                                      (take-nth 2 destructured))))]
     `(let* ~destructured
-       (assert testomic.core/conn "No conn present!")
-      (binding [testomic.core/*tempid-map* (reduce-tx-tempids testomic.core/conn ~tx-symbols)]
+       (assert testomic.core/*conn* "No conn present!")
+       (binding [testomic.core/*tempid-map* (reduce-tx-tempids testomic.core/*conn* ~tx-symbols)
+                 testomic.core/*db* (d/db testomic.core/*conn*)]
         (let* ~destructured-wrapped
           ~@body)))))
+
+(defmacro let-db-with-txs
+  "Like let-txs, but "
+  [db-sym tx-bindings & body]
+  (assert (vector? tx-bindings) "a vector for its binding")
+  (assert (even? (count tx-bindings)) "an even number of forms in binding vector")
+  (let [destructured (destructure tx-bindings)
+        rights (into #{} (take-nth 2 (drop 1 tx-bindings)))
+        tx-symbols (into []
+                         (for [[left right] (partition 2 destructured)
+                               :when (rights right)]
+                           left))
+        ;; Wrap all bindings to resolve if they are a tempid
+        destructured-wrapped (into []
+                                   (interleave
+                                    (take-nth 2 destructured)
+                                    (map
+                                     wrap-tempid-db
+                                     (take-nth 2 destructured))))]
+    `(let* ~destructured
+       (assert testomic.core/*db* "No db present!")
+       (let [with-result# (reduce-tx-tempids-with testomic.core/*db* ~tx-symbols)]
+         (binding [testomic.core/*tempid-map* (:tx-tids with-result#)
+                   testomic.core/*conn* nil ;; no conn so it can't be used further
+                   testomic.core/*db* (:db-after with-result#)]
+           (let* ~destructured-wrapped
+             (let [~db-sym testomic.core/*db*]
+               ~@body)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test Fixtures/Fixture Factories
@@ -145,13 +205,14 @@
 (defn wrap-conn
   "Like with-conn, but suitable for use as a clojure.test fixture."
   [f]
-  (if conn
+  (if *conn*
     (f)
     (binding [*db-uri* (rand-db-uri)]
-      (binding [conn (new-conn *db-uri*)]
-        (try (f)
+      (binding [*conn* (new-conn *db-uri*)]
+        (binding [*db* (d/db *conn*)]
+          (try (f)
              (finally
-               (d/release conn)))))))
+               (d/release *conn*))))))))
 
 (defn make-wrap-txs-fixture
   "Given a vector of transactions, it returns a function suitable for use as a
@@ -159,7 +220,7 @@
    and binds a map of tempids for resolution."
   [txs]
   (fn wrap-txs [f]
-    (if conn
-      (binding [*tempid-map* (reduce-tx-tempids conn txs)]
+    (if *conn*
+      (binding [*tempid-map* (reduce-tx-tempids *conn* txs)]
         (f))
       (wrap-conn #(wrap-txs f)))))

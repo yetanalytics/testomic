@@ -1,4 +1,4 @@
-(defproject com.yetanalytics/testomic "0.1.3"
+(defproject com.yetanalytics/testomic "0.1.4-SNAPSHOT"
   :description "Testing utilities and macros for use with datomic."
   :url "http://github.com/yetanalytics/testomic"
   :license {:name "Eclipse Public License"
